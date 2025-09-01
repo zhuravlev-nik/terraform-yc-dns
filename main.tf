@@ -7,24 +7,23 @@ resource "yandex_dns_zone" "zones" {
   labels = merge({ managed_by = "terraform" }, lookup(each.value, "labels", {}))
 }
 
-
 locals {
-  zone_domain_by_name = {
-    for z in var.dns_zones : z.name => z.zone
-  }
+  zone_domain_by_name = { for z in var.dns_zones : z.name => z.zone }
   recordsets_map = {
     for rs in flatten([
       for z in var.dns_zones : [
         for r in lookup(z, "recordsets", []) : {
           zone_name = z.name
           zone_fqdn = z.zone
-          name_fqdn = (
-            contains(r.name, ".")
-            ? lower(trimsuffix(r.name, "."))
-            : lower("${r.name}.${trimsuffix(z.zone, ".")}")
-          )
+          name_fqdn = lower(trimsuffix(
+            endswith(r.name, ".")
+              ? r.name
+              : "${r.name}.${trimsuffix(z.zone, ".")}.",
+            "."
+          ))
+
           type = upper(r.type)
-          ttl  = coalesce(r.ttl, var.default_ttl)
+          ttl  = coalesce(try(r.ttl, null), var.default_ttl)
           data = sort(distinct(tolist(r.data)))
         }
       ]
@@ -32,8 +31,6 @@ locals {
     "${rs.zone_name}|${rs.name_fqdn}|${rs.type}" => rs
   }
 }
-
-
 
 resource "yandex_dns_recordset" "recordsets" {
   for_each = local.recordsets_map
