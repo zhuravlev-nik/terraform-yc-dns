@@ -4,28 +4,42 @@ resource "yandex_dns_zone" "zones" {
   name   = each.value.name
   zone   = each.value.zone
   public = each.value.public
-  labels = merge(
-    { "managed_by" = "terraform" },
-    each.value.labels
-  )
+  labels = merge({ managed_by = "terraform" }, lookup(each.value, "labels", {}))
 }
 
-resource "yandex_dns_recordset" "recordsets" {
-  for_each = { for idx, record in flatten([
-    for zone in var.dns_zones : [
-      for recordset in zone.recordsets : {
-        zone_name = zone.name
-        zone_id   = yandex_dns_zone.zones[zone.name].id
-        name      = recordset.name
-        type      = recordset.type
-        ttl       = recordset.ttl
-        data      = recordset.data
-      }
-    ]
-  ]) : "${record.zone_name}-${record.name}-${idx}" => record }
 
-  zone_id = each.value.zone_id
-  name    = each.value.name
+locals {
+  zone_domain_by_name = {
+    for z in var.dns_zones : z.name => z.zone
+  }
+  recordsets_map = {
+    for rs in flatten([
+      for z in var.dns_zones : [
+        for r in lookup(z, "recordsets", []) : {
+          zone_name = z.name
+          zone_fqdn = z.zone
+          name_fqdn = (
+            contains(r.name, ".")
+            ? lower(trimsuffix(r.name, "."))
+            : lower("${r.name}.${trimsuffix(z.zone, ".")}")
+          )
+          type = upper(r.type)
+          ttl  = coalesce(r.ttl, var.default_ttl)
+          data = sort(distinct(tolist(r.data)))
+        }
+      ]
+    ]) :
+    "${rs.zone_name}|${rs.name_fqdn}|${rs.type}" => rs
+  }
+}
+
+
+
+resource "yandex_dns_recordset" "recordsets" {
+  for_each = local.recordsets_map
+
+  zone_id = yandex_dns_zone.zones[each.value.zone_name].id
+  name    = "${each.value.name_fqdn}."
   type    = each.value.type
   ttl     = each.value.ttl
   data    = each.value.data

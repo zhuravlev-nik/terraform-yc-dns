@@ -8,8 +8,13 @@ variable "dns_zones" {
     recordsets = optional(list(object({
       name = string
       type = string
-      ttl  = number
-      data = list(string)
+      ttl  = optional(number)
+      data = set(string)
     })), [])
   }))
+}
+
+variable "default_ttl" {
+  type    = number
+  default = 300
 }
